@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Student Record System</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f3f4f6;
+      margin: 0;
+      padding: 20px;
+      color: #1f2937;
+    }
+    .container { max-width: 900px; margin: 0 auto; }
+    h1 { text-align: center; margin-bottom: 20px; }
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+    }
+    .card h2 { margin-top: 0; font-size: 18px; }
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+    label { font-size: 13px; font-weight: bold; display: block; margin-bottom: 4px; }
+    input, select {
+      width: 100%;
+      padding: 9px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    button {
+      padding: 9px 16px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      color: #fff;
+    }
+    .btn-save { background: #2563eb; }
+    .btn-cancel { background: #6b7280; }
+    .btn-edit { background: #f59e0b; padding: 6px 12px; }
+    .btn-delete { background: #dc2626; padding: 6px 12px; }
+    .actions { margin-top: 15px; display: flex; gap: 10px; }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+    .toolbar input { max-width: 280px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px; border-bottom: 1px solid #e5e7eb; font-size: 14px; }
+    th { background: #f9fafb; }
+    td.row-actions { display: flex; gap: 6px; }
+    .message { padding: 10px; border-radius: 6px; margin-bottom: 15px; display: none; font-size: 14px; }
+    .message.ok { background: #d1fae5; color: #065f46; display: block; }
+    .message.error { background: #fee2e2; color: #991b1b; display: block; }
+    .empty { text-align: center; color: #6b7280; padding: 20px; }
+    @media (max-width: 600px) {
+      th:nth-child(1), td:nth-child(1) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Student Record System</h1>
+
+    <div id="message" class="message"></div>
+
+    <!-- Form -->
+    <div class="card">
+      <h2 id="form-title">Add Student</h2>
+      <form id="student-form">
+        <div class="form-grid">
+          <div>
+            <label for="student_no">Student No.</label>
+            <input type="text" id="student_no" required />
+          </div>
+          <div>
+            <label for="full_name">Full Name</label>
+            <input type="text" id="full_name" required />
+          </div>
+          <div>
+            <label for="course">Course</label>
+            <input type="text" id="course" placeholder="e.g. BSIT" required />
+          </div>
+          <div>
+            <label for="year_level">Year Level</label>
+            <select id="year_level" required>
+              <option value="1">1st Year</option>
+              <option value="2">2nd Year</option>
+              <option value="3">3rd Year</option>
+              <option value="4">4th Year</option>
+            </select>
+          </div>
+        </div>
+        <div class="actions">
+          <button type="submit" class="btn-save" id="save-btn">Save Student</button>
+          <button type="button" class="btn-cancel" id="cancel-btn" style="display:none;">Cancel</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- List -->
+    <div class="card">
+      <div class="toolbar">
+        <h2 style="margin:0;">Student List</h2>
+        <input type="text" id="search" placeholder="Search name, number or course..." />
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Student No.</th>
+            <th>Full Name</th>
+            <th>Course</th>
+            <th>Year</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="student-table"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    // ====== YOUR SUPABASE SETTINGS ======
+    const SUPABASE_URL = "https://zggjmatkhlwrhlpqptgo.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_yHnIXkZVx6pyqJoN54xcEg_1tyZmvy4";
+    // ====================================
+
+    const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    const form = document.getElementById("student-form");
+    const tableBody = document.getElementById("student-table");
+    const messageBox = document.getElementById("message");
+    const cancelBtn = document.getElementById("cancel-btn");
+    const searchInput = document.getElementById("search");
+
+    let editingId = null;
+    let allStudents = [];
+
+    function showMessage(text, type) {
+      messageBox.textContent = text;
+      messageBox.className = "message " + type;
+      setTimeout(() => { messageBox.className = "message"; }, 4000);
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement("div");
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function yearLabel(n) {
+      const labels = { 1: "1st Year", 2: "2nd Year", 3: "3rd Year", 4: "4th Year" };
+      return labels[n] || n + "th Year";
+    }
+
+    function renderTable(list) {
+      if (list.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="5" class="empty">No students found.</td></tr>';
+        return;
+      }
+      tableBody.innerHTML = list.map(s => `
+        <tr>
+          <td>${escapeHtml(s.student_no)}</td>
+          <td>${escapeHtml(s.full_name)}</td>
+          <td>${escapeHtml(s.course)}</td>
+          <td>${yearLabel(s.year_level)}</td>
+          <td class="row-actions">
+            <button class="btn-edit" onclick="startEdit(${s.id})">Edit</button>
+            <button class="btn-delete" onclick="deleteStudent(${s.id})">Delete</button>
+          </td>
+        </tr>
+      `).join("");
+    }
+
+    async function loadStudents() {
+      const { data, error } = await db
+        .from("students")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        showMessage("Could not load students: " + error.message, "error");
+        return;
+      }
+      allStudents = data;
+      applySearch();
+    }
+
+    function applySearch() {
+      const q = searchInput.value.trim().toLowerCase();
+      const filtered = allStudents.filter(s =>
+        s.student_no.toLowerCase().includes(q) ||
+        s.full_name.toLowerCase().includes(q) ||
+        s.course.toLowerCase().includes(q)
+      );
+      renderTable(filtered);
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const student = {
+        student_no: document.getElementById("student_no").value.trim(),
+        full_name: document.getElementById("full_name").value.trim(),
+        course: document.getElementById("course").value.trim(),
+        year_level: parseInt(document.getElementById("year_level").value, 10)
+      };
+
+      let error;
+      if (editingId) {
+        ({ error } = await db.from("students").update(student).eq("id", editingId));
+      } else {
+        ({ error } = await db.from("students").insert(student));
+      }
+
+      if (error) {
+        showMessage("Error: " + error.message, "error");
+        return;
+      }
+
+      showMessage(editingId ? "Student updated!" : "Student added!", "ok");
+      resetForm();
+      loadStudents();
+    });
+
+    function startEdit(id) {
+      const s = allStudents.find(x => x.id === id);
+      if (!s) return;
+      editingId = id;
+      document.getElementById("student_no").value = s.student_no;
+      document.getElementById("full_name").value = s.full_name;
+      document.getElementById("course").value = s.course;
+      document.getElementById("year_level").value = s.year_level;
+      document.getElementById("form-title").textContent = "Edit Student";
+      document.getElementById("save-btn").textContent = "Update Student";
+      cancelBtn.style.display = "inline-block";
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    async function deleteStudent(id) {
+      if (!confirm("Delete this student?")) return;
+      const { error } = await db.from("students").delete().eq("id", id);
+      if (error) {
+        showMessage("Error: " + error.message, "error");
+        return;
+      }
+      showMessage("Student deleted.", "ok");
+      loadStudents();
+    }
+
+    function resetForm() {
+      form.reset();
+      editingId = null;
+      document.getElementById("form-title").textContent = "Add Student";
+      document.getElementById("save-btn").textContent = "Save Student";
+      cancelBtn.style.display = "none";
+    }
+
+    cancelBtn.addEventListener("click", resetForm);
+    searchInput.addEventListener("input", applySearch);
+
+    loadStudents();
+  </script>
+</body>
+</html>
